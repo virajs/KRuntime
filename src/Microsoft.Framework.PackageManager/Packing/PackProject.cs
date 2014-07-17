@@ -32,7 +32,19 @@ namespace Microsoft.Framework.PackageManager.Packing
         public string TargetPath { get; private set; }
         public string AppFolder { get; set; }
 
-        public void EmitSource(PackRoot root)
+        public void Emit(PackRoot root)
+        {
+            if (root.NoSource)
+            {
+                EmitNupkg(root);
+            }
+            else
+            {
+                EmitSource(root);
+            }
+        }
+
+        private void EmitSource(PackRoot root)
         {
             Console.WriteLine("Packing project dependency {0}", _libraryDescription.Identity.Name);
 
@@ -71,7 +83,7 @@ namespace Microsoft.Framework.PackageManager.Packing
             });
         }
 
-        public void EmitNupkg(PackRoot root)
+        private void EmitNupkg(PackRoot root)
         {
             Console.WriteLine("Packing nupkg from project dependency {0}", _libraryDescription.Identity.Name);
 
@@ -137,6 +149,11 @@ namespace Microsoft.Framework.PackageManager.Packing
                 var sha512Bytes = SHA512.Create().ComputeHash(sourceStream);
                 File.WriteAllText(hashFile, Convert.ToBase64String(sha512Bytes));
             }
+
+            // Copy content files (e.g. html, js and images) of main project into "root" folder of the exported package
+            var rootFolderPath = Path.Combine(TargetPath, "root");
+            CopyContentFiles(root, project, rootFolderPath, copyProjectJson: true);
+
         }
 
         public void PostProcess(PackRoot root)
@@ -158,7 +175,7 @@ namespace Microsoft.Framework.PackageManager.Packing
             Directory.CreateDirectory(appFolderPath);
 
             // Copy content files (e.g. html, js and images) of main project into public app folder
-            CopyContentFiles(root, project, appFolderName);
+            CopyContentFiles(root, project, appFolderPath, copyProjectJson: false);
 
             // Tool dlls including AspNet.Loader.dll go to bin folder under public app folder
             var appFolderBinPath = Path.Combine(appFolderPath, "bin");
@@ -222,20 +239,18 @@ root.Configuration));
             }
         }
 
-        private void CopyContentFiles(PackRoot root, Project project, string appFolderName)
+        private void CopyContentFiles(PackRoot root, Project project, string targetFolderPath, bool copyProjectJson)
         {
             Console.WriteLine("Copying contents of project dependency {0} to {1}",
-                _libraryDescription.Identity.Name, appFolderName);
-
-            var appFolderPath = Path.Combine(root.OutputPath, appFolderName);
+                _libraryDescription.Identity.Name, Path.GetFileName(targetFolderPath));
 
             Console.WriteLine("  Source {0}", project.ProjectDirectory);
-            Console.WriteLine("  Target {0}", appFolderPath);
+            Console.WriteLine("  Target {0}", targetFolderPath);
 
             // A set of content files that should be copied
             var contentFiles = new HashSet<string>(project.ContentFiles, StringComparer.OrdinalIgnoreCase);
 
-            root.Operations.Copy(project.ProjectDirectory, appFolderPath, (isRoot, filePath) =>
+            root.Operations.Copy(project.ProjectDirectory, targetFolderPath, (isRoot, filePath) =>
             {
                 // We always explore a directory
                 if (Directory.Exists(filePath))
@@ -245,7 +260,7 @@ root.Configuration));
 
                 var fileName = Path.GetFileName(filePath);
                 // Public app folder doesn't need project.json
-                if (string.Equals(fileName, "project.json", StringComparison.OrdinalIgnoreCase))
+                if (!copyProjectJson && string.Equals(fileName, "project.json", StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
                 }
